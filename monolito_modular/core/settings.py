@@ -43,6 +43,7 @@ INSTALLED_APPS = [
     'cardapio',
     'pedidos',
     'pagamento',
+    'notificacao',
 ]
 
 MIDDLEWARE = [
