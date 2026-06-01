@@ -1,1 +1,1 @@
-# trabalho-arquiteturas
+# trabalho-arquitetura
