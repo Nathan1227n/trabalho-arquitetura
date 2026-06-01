@@ -1,3 +1,7 @@
-from django.shortcuts import render
+from rest_framework import viewsets
+from .models import ItemCardapio
+from .serializers import ItemCardapioSerializer
 
-# Create your views here.
+class ItemCardapioViewSet(viewsets.ModelViewSet):
+    queryset = ItemCardapio.objects.all()
+    serializer_class = ItemCardapioSerializer
