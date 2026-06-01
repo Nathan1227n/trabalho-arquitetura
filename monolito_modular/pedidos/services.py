@@ -1,8 +1,7 @@
 from .models import Pedido
-# Importamos APENAS das interfaces dos outros módulos!
+# Importamos APENAS da interface do módulo de pagamento (Padrão Modular)
 from pagamento.services import PagamentoService
-# Supondo que você crie um app/módulo separado para notificação
-# from notificacao.services import NotificacaoService 
+from notificacao.services import NotificacaoService
 
 class PedidoService:
     @staticmethod
@@ -10,14 +9,17 @@ class PedidoService:
         pedido = Pedido.objects.get(id=pedido_id)
         
         # 1. Chama o módulo de pagamento via interface
-        sucesso = PagamentoService.processar_pagamento_mock(pedido_id, valor_total)
+        # Aqui recebemos o status ('APROVADO', 'PENDENTE', etc)
+        status_pagamento = PagamentoService.processar_pagamento_mock(pedido_id, valor_total)
         
-        if sucesso:
+        # Se for aprovado, atualizamos o pedido
+        if status_pagamento == 'APROVADO':
             pedido.status = 'PAGO'
             pedido.save()
             
             # 2. Chama a notificação (acoplamento via interface)
-            # NotificacaoService.avisar_cozinha(pedido_id)
+            NotificacaoService.avisar_cozinha(pedido.id)
+
             pedido.status = 'COZINHA'
             pedido.save()
             

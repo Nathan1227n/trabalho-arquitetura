@@ -1,7 +1,8 @@
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
-from .serializers import CriarPedidoSerializer
+# Adicionamos a importação do PedidoSerializer aqui
+from .serializers import CriarPedidoSerializer, PedidoSerializer 
 from .models import Pedido, PedidoItem
 from .services import PedidoService
 
@@ -9,6 +10,14 @@ from .services import PedidoService
 from cardapio.services import CardapioService 
 
 class PedidoAPIView(APIView):
+    # --- NOVO: Método para listar os pedidos ---
+    def get(self, request):
+        """Lista todos os pedidos"""
+        pedidos = Pedido.objects.all()
+        serializer = PedidoSerializer(pedidos, many=True)
+        return Response(serializer.data)
+    # -------------------------------------------
+
     def post(self, request):
         serializer = CriarPedidoSerializer(data=request.data)
         if not serializer.is_valid():
@@ -48,3 +57,24 @@ class PedidoAPIView(APIView):
             "status_final": pedido_atualizado.status,
             "valor_total": valor_total
         }, status=status.HTTP_201_CREATED)
+
+
+class CancelarPedidoAPIView(APIView):
+    def patch(self, request, pedido_id):
+        """Cancela um pedido específico"""
+        try:
+            pedido = Pedido.objects.get(id=pedido_id)
+            
+            # Regra: Só pode cancelar se ainda não foi para a cozinha
+            if pedido.status in ['COZINHA', 'PAGO']:
+                return Response(
+                    {"erro": "Não é possível cancelar um pedido que já foi pago ou está na cozinha."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+                
+            pedido.status = 'CANCELADO'
+            pedido.save()
+            return Response({"mensagem": f"Pedido {pedido_id} cancelado com sucesso."})
+            
+        except Pedido.DoesNotExist:
+            return Response({"erro": "Pedido não encontrado."}, status=status.HTTP_404_NOT_FOUND)
