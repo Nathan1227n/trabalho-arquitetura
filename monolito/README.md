@@ -222,7 +222,7 @@ No monolito, **não há isolamento real**. Se um módulo falha, tudo compromete-
   Django. Colocamos um print() em cada etapa do fluxo (na criação do pedido, no recebimento do pagamento e 
   na criação da notificação) e conseguimos encontrar o erro a partir do terminal da aplicação.
 
-## Experimentos obrigatórios (Seção 5 e 6 do trabalho)
+## Experimentos obrigatórios 
 
 ### Simular lentidão no módulo de pagamento (sleep 5s)
 
