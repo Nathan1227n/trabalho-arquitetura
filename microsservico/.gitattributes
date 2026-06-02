@@ -1,0 +1,4 @@
+# Garante LF nos scripts de shell para que o entrypoint funcione dentro
+# dos containers Linux mesmo quando o repo e clonado no Windows.
+*.sh text eol=lf
+entrypoint.sh text eol=lf
