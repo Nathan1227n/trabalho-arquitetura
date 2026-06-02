@@ -2,7 +2,6 @@ from django.db import models
 import uuid
 
 class ItemCardapio(models.Model):
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     nome = models.CharField(max_length=100)
     preco = models.DecimalField(max_digits=6, decimal_places=2)
     disponivel = models.BooleanField(default=True)
@@ -18,7 +17,6 @@ class Pedido(models.Model):
         ('PRONTO', 'Pronto'),
         ('ENTREGUE', 'Entregue'),
     ]
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='PENDENTE')
     observacao = models.TextField(blank=True, null=True)
     
@@ -26,7 +24,6 @@ class Pedido(models.Model):
         return f"Pedido #{self.id} - Status: {self.status}"
 
 class ItemPedido(models.Model):
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     pedido = models.ForeignKey(Pedido, on_delete=models.CASCADE)
     item_cardapio = models.ForeignKey(ItemCardapio, on_delete=models.CASCADE)
     preco = models.DecimalField(max_digits=6, decimal_places=2)
@@ -42,7 +39,6 @@ class Pagamento(models.Model):
         ('REJEITADO', 'Rejeitado'),
     ]
 
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     pedido = models.ForeignKey(Pedido, on_delete=models.CASCADE)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='PENDENTE')
     
@@ -50,7 +46,6 @@ class Pagamento(models.Model):
         return f"Pagamento do pedido #{self.pedido.id} - Status: {self.status}"
     
 class Notificacao(models.Model):
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     pedido = models.ForeignKey(Pedido, on_delete=models.CASCADE)
     
     def __str__(self):
