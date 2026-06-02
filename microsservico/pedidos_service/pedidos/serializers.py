@@ -6,3 +6,4 @@ class CriarPedidoSerializer(serializers.Serializer):
         allow_empty=False,
         help_text="Lista de IDs dos itens do cardapio"
     )
+    observacao = serializers.CharField(required=False, allow_blank=True)

@@ -224,24 +224,7 @@ No monolito, **não há solução elegante** sem mudar a arquitetura:
 ```bash
 # Editar os arquivos acima
 
-python manage.py makemigrations
-python manage.py migrate
-python manage.py runserver
-```
-
-#### Resultado (execução realizada em 2026-06-02)
-
-- **Arquivos alterados:** `restaurante/models.py`, `restaurante/serializers.py`, `restaurante/views.py`.
-- **Migration criada:** `restaurante/migrations/000X_pedido_observacao.py`.
-- **Total de arquivos tocados:** 3 (models, serializers, views).
-- **Tempo total estimado nesta máquina:** ~10 minutos (edição + makemigrations + migrate + teste).
-
-**Teste da mudança:**
-```bash
-curl -X POST http://localhost:8000/api/pedidos/ \
-  -H "Content-Type: application/json" \
-  -d '{"itens":[{"item_cardapio":1,"quantidade":2}],"observacao":"sem cebola"}'
-```
+## Experimentos obrigatórios 
 
 **Conclusão:** No monolito, mudanças tópicas tocam poucos arquivos (3 neste caso) e são rápidas de
 implementar. Porém, qualquer mudança exige restart do servidor inteiro, e o deploy afeta todo o sistema.

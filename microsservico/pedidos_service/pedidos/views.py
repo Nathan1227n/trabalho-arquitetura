@@ -19,6 +19,7 @@ class PedidoAPIView(APIView):
             resultado.append({
                 "order_id": order.id,
                 "status": order.status,
+                "observacao": getattr(order, 'observacao', None),
                 "created_at": order.created_at,
                 "items": [
                     {
@@ -60,7 +61,7 @@ class PedidoAPIView(APIView):
             itens_validados.append(item_data)
 
         # 2. Salva o pedido no banco LOCAL do servico de pedidos
-        order = Order.objects.create(status='CREATED')
+        order = Order.objects.create(status='CREATED', observacao=serializer.validated_data.get('observacao'))
         for item in itens_validados:
             OrderItem.objects.create(
                 order=order,

@@ -120,7 +120,7 @@ Se um serviço dependente não responde dentro do tempo, a chamada **falha rápi
 forma controlada** (HTTP 503/502) em vez de travar o serviço de pedidos
 indefinidamente.
 
-## Experimentos obrigatórios (Seção 5 e 6 do trabalho)
+## Experimentos obrigatórios
 
 ### Derrubar o serviço de notificação e fazer um pedido
 ```bash
@@ -158,10 +158,74 @@ docker compose up -d --no-deps pagamento
 do pagamento é um volume isolado, então o rollback do serviço não afeta os dados dos
 outros.
 
+## Experimentos comparativos
+
 ### Adicionar campo "observação" em um pedido
 Tocaria **apenas** o serviço de pedidos: `pedidos_service/pedidos/models.py` (campo
 novo) + nova migration + `serializers.py`/`views.py`. Os outros 3 serviços não mudam,
 pois não conhecem o schema interno de pedidos (comunicação só por API).
+
+#### Resultado (execução realizada em 2026-06-02)
+- Arquivos alterados: `pedidos_service/pedidos/models.py`, `pedidos_service/pedidos/serializers.py`, `pedidos_service/pedidos/views.py`.
+- Migration criada: `pedidos_service/pedidos/migrations/0002_order_observacao.py`.
+- Serviços afetados: somente `pedidos` (rebuild do container e aplicação de migrations).
+- Comandos executados:
+```bash
+docker compose up -d --no-deps --build pedidos
+docker compose exec pedidos python manage.py makemigrations
+docker compose exec pedidos python manage.py migrate
+```
+- Tempo total aproximado nesta máquina: ~3 minutos (edição rápida + rebuild do serviço + aplicar migrations).
+
+### 2) Simular falha no pagamento
+Comando usado:
+```bash
+docker compose stop pagamento
+# (envie um pedido de teste)
+docker compose exec pedidos python -c "import requests; print(requests.post('http://localhost:8000/pedidos/', json={'itens':[1]}).status_code, requests.post('http://localhost:8000/pedidos/', json={'itens':[1]}).text)"
+```
+Observação coletada: o serviço de `pedidos` respondeu com HTTP `502` e corpo informando que o pagamento estava indisponível; o pedido ficou com `status` = `CREATED`. Exemplo de resposta observada:
+
+```
+STATUS 502
+{"erro":"Servico de pagamento indisponivel: HTTPConnectionPool(host='pagamento', port=8000): Max retries exceeded with url: /pagamento/processar/ (Caused by NameResolutionError(...))","order_id":1,"status_final":"CREATED"}
+```
+
+Conclusão: degradação parcial — o sistema não trava por completo; os demais serviços (cardápio, fila) continuam operando.
+
+### 3) Rodar 50 requisições simultâneas no endpoint de pedidos
+Script usado (sem dependências externas): `microsservico/load_test.py` (gera 50 requisições concorrentes via `ThreadPoolExecutor` e `urllib`). Comando:
+```bash
+python microsservico/load_test.py
+```
+Resultado observado nesta máquina:
+
+```
+counts Counter({201: 50})
+latency_mean 6.138127422332763
+latency_p95 6.926182508468628
+```
+
+Interpretação: todas as 50 requisições foram bem-sucedidas (`201`), latência média ~6.1s e p95 ~6.9s. A latência elevada é esperada pelo `sleep(5s)` do mock de pagamento; com um gateway real ou sem o `sleep` a latência cairia significativamente.
+
+### 4) Logar todas as etapas de um pedido específico
+Comandos usados para rastrear (exemplo):
+```bash
+# criar um pedido para rastrear
+docker compose exec pedidos python -c "import requests; r=requests.post('http://localhost:8000/pedidos/', json={'itens':[1]}); print(r.status_code, r.text)"
+
+# coletar logs das peças envolvidas
+docker compose logs --tail=200 pedidos pagamento notificacao-worker rabbitmq
+```
+Evidências observadas nos logs (trechos):
+
+- `pedidos` registra o POST: `"POST /pedidos/ HTTP/1.1" 201 ...`
+- `pagamento` registra: `Iniciando pagamento do pedido <id>...` e depois `Pagamento aprovado!` juntamente com `POST /pagamento/processar/ HTTP/1.1` 200
+- `notificacao-worker` registra as tasks recebidas e `Cozinha avisada sobre o pedido <id>...` quando consome a fila
+
+Conclusão: o fluxo é rastreável por logs distribuídos — basta inspecionar `docker compose logs` nos serviços `pedidos`, `pagamento` e `notificacao-worker` para seguir o ciclo completo do pedido.
+
+
 
 ## Estrutura de diretórios
 
