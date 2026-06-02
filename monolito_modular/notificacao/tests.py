@@ -1,3 +1,6 @@
 from django.test import TestCase
 
-# Create your tests here.
+
+class NotificacaoAppTests(TestCase):
+    def test_app_import(self):
+        self.assertTrue(True)

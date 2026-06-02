@@ -1,6 +1,8 @@
 from django.urls import path
-from .views import ConsultarPagamentoView
+from .views import PagamentoHealthView, PagamentoStatusView
 
 urlpatterns = [
-    path('<int:pedido_id>/', ConsultarPagamentoView.as_view(), name='consultar_pagamento'),
+    path('health/', PagamentoHealthView.as_view(), name='pagamento_health'),
+    path('status/<int:pedido_id>/', PagamentoStatusView.as_view(), name='pagamento_status'),
+    path('<int:pedido_id>/', PagamentoStatusView.as_view(), name='consultar_pagamento'),
 ]

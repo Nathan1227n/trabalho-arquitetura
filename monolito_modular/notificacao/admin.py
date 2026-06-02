@@ -1,3 +1,3 @@
 from django.contrib import admin
 
-# Register your models here.
+# Registro de admin do módulo de notificacao, se necessário no futuro.
