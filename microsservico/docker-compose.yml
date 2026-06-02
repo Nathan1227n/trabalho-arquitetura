@@ -1,0 +1,122 @@
+services:
+
+  # ---------------------------------------------------------------------------
+  # Broker de mensageria (fila assincrona para a notificacao da cozinha)
+  # ---------------------------------------------------------------------------
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: rabbitmq
+    ports:
+      - "5672:5672"     # protocolo AMQP
+      - "15672:15672"   # painel de gerenciamento (guest/guest)
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  # ---------------------------------------------------------------------------
+  # Servico de Cardapio (porta 8001)
+  # ---------------------------------------------------------------------------
+  cardapio:
+    build: ./cardapio_service
+    container_name: cardapio
+    ports:
+      - "8001:8000"
+    volumes:
+      - cardapio_db:/app/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # ---------------------------------------------------------------------------
+  # Servico de Pagamento (porta 8003)
+  # ---------------------------------------------------------------------------
+  pagamento:
+    build: ./pagamento_service
+    container_name: pagamento
+    ports:
+      - "8003:8000"
+    volumes:
+      - pagamento_db:/app/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # ---------------------------------------------------------------------------
+  # Servico de Pedidos (porta 8002) - orquestrador do fluxo
+  # ---------------------------------------------------------------------------
+  pedidos:
+    build: ./pedidos_service
+    container_name: pedidos
+    ports:
+      - "8002:8000"
+    volumes:
+      - pedidos_db:/app/data
+    environment:
+      CARDAPIO_URL: "http://cardapio:8000"
+      PAGAMENTO_URL: "http://pagamento:8000"
+      CELERY_BROKER_URL: "amqp://guest:guest@rabbitmq:5672//"
+    depends_on:
+      cardapio:
+        condition: service_healthy
+      pagamento:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # ---------------------------------------------------------------------------
+  # Servico de Notificacao - parte WEB (porta 8004): health + listagem
+  # ---------------------------------------------------------------------------
+  notificacao:
+    build: ./notificacao_service
+    container_name: notificacao
+    ports:
+      - "8004:8000"
+    volumes:
+      - notificacao_db:/app/data
+    environment:
+      CELERY_BROKER_URL: "amqp://guest:guest@rabbitmq:5672//"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # ---------------------------------------------------------------------------
+  # Servico de Notificacao - parte WORKER: consome a fila do RabbitMQ.
+  # Mesma imagem/codigo do servico web, compartilhando o mesmo banco (volume).
+  # ---------------------------------------------------------------------------
+  notificacao-worker:
+    build: ./notificacao_service
+    container_name: notificacao-worker
+    entrypoint: ["celery", "-A", "core", "worker", "-l", "info"]
+    volumes:
+      - notificacao_db:/app/data
+    environment:
+      CELERY_BROKER_URL: "amqp://guest:guest@rabbitmq:5672//"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      notificacao:
+        condition: service_healthy
+
+volumes:
+  cardapio_db:
+  pagamento_db:
+  pedidos_db:
+  notificacao_db:
