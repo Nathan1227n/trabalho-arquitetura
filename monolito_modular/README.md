@@ -119,15 +119,8 @@ O projeto estará disponível em `http://127.0.0.1:8000/`.
    - valida itens via `CardapioService`
    - processa pagamento com `PagamentoService` (5s de delay)
    - notifica a cozinha via `NotificacaoService`
+  
 
-## O que foi ajustado neste módulo
-
-- Corrigida a falta de `pagamento/urls.py`
-- Adicionado serviço de notificação interno (`notificacao/services.py`)
-- Adicionado app Django completo `notificacao` com URLs e views de health check
-- Implementado listagem e cancelamento de pedidos no módulo `pedidos`
-- Adicionada rota global `/health/`
-- Verificado com `./venv/bin/python3 manage.py check`
 
 ## Estrutura de diretórios
 
