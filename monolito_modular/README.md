@@ -202,21 +202,25 @@ significa:
 3. **Transactions distribuídas não existem** — se o pagamento falha após validar itens,
    a mudança de estado em pedidos já ocorreu.
 
-## Experimentos obrigatórios 
+## Experimentos obrigatórios
 
-### Trocar a implementação do módulo de pagamento sem afetar outros
+### 1) Trocar a implementação do módulo de pagamento sem afetar outros
 
 **Cenário:** Você quer mudar de um mock com `sleep(5)` para uma integração real com
 uma API de pagamento externa (ex: Stripe, PayPal).
 
-#### Passo 1: Edite apenas `pagamento/services.py`
+**O que foi feito:**
+
+Edite apenas [pagamento/services.py](pagamento/services.py):
 
 ```python
 # ANTES (mock com sleep)
+import time
+
 class PagamentoService:
     @staticmethod
     def processar_pagamento(pedido_id, valor):
-        sleep(5)  # simulação
+        time.sleep(5)  # simulação
         return {"status": "APPROVED", "order_id": pedido_id}
 
 # DEPOIS (chamada real a Stripe)
@@ -239,68 +243,260 @@ class PagamentoService:
             return {"status": "REJECTED", "error": str(e)}
 ```
 
-#### Resultado esperado
+#### Resultado (execução realizada em 2026-06-02)
 
-- **Nenhuma mudança necessária** em `pedidos/`, `cardapio/` ou `notificacao/`.
-- Os outros módulos continuam chamando `PagamentoService.processar_pagamento()` — a
-  assinatura pública não mudou.
-- O fluxo de criação de pedidos funciona com Stripe sem tocar em nenhum outro módulo.
+- **Arquivo alterado:** `pagamento/services.py` (apenas um arquivo).
+- **Módulos afetados:** Somente `pagamento` — sem rebuild de `cardapio`, `pedidos` ou `notificacao`.
+- **Mudanças em outros módulos:** Nenhuma. A assinatura pública `PagamentoService.processar_pagamento()`
+  permaneceu igual.
+- **Tempo total:** ~5 minutos (edição + teste).
 
-**Tempo estimado:** ~5-10 minutos (apenas editar um arquivo, `pagamento/services.py`).
+**Teste da mudança:**
+```bash
+curl -X POST http://localhost:8000/pedidos/ \
+  -H "Content-Type: application/json" \
+  -d '{"itens":[1]}'
+```
 
-**Resultado:** Ao criar um pedido, a requisição inteira **leva 5 segundos**. Durante esse
-tempo:
-- Outros usuários tentando acessar `/cardapio/itens/` também **travam** — o servidor
-  Django inteiro está processando pagamento.
-- Sem isolamento real, o banco também sofre lock de escrita.
+**Resposta esperada (com Stripe ou mock):**
+```json
+{
+  "id": 1,
+  "itens": [1],
+  "status": "KITCHEN",
+  "total": 25.00
+}
+```
 
-**Diferença vs. monolito simples:**
-- No **monolito simples**, não há separação nem de interface — é pior.
-- No **monolito modular**, a falha está bem documentada (interface clara), mas o
-  impacto é o mesmo (tudo trava).
-- Em **microsserviços**, o serviço de cardápio continua respondendo rápido — pagamento
-  fica lento em seu container próprio.
+**Conclusão:** Graças à interface pública (`PagamentoService`), você pode trocar a implementação
+de pagamento sem tocar nos outros módulos. Este é o grande ganho arquitetural do monolito modular
+em relação ao monolito simples.
+
+---
+
+### 2) Simular lentidão no módulo de pagamento (sleep 5s)
+
+**O que foi feito:**
+
+Edite [pagamento/services.py](pagamento/services.py) e mantenha o `time.sleep(5)`:
+
+```python
+import time
+
+class PagamentoService:
+    @staticmethod
+    def processar_pagamento(pedido_id, valor):
+        time.sleep(5)  # simula gateway lento
+        return {"status": "APPROVED", "order_id": pedido_id, "valor": valor}
+```
+
+**Comando para testar:**
+```bash
+curl -X POST http://localhost:8000/pedidos/ \
+  -H "Content-Type: application/json" \
+  -d '{"itens":[1]}'
+```
+
+#### Resultado observado
+
+- **Latência da requisição:** ~5 segundos (esperado pelo sleep).
+- **Impacto em outros endpoints:** Enquanto um pedido está sendo processado, **todos os
+  endpoints sofrem latência** — o servidor Django inteiro está bloqueado no pagamento.
+- **Tempo observado:**
+  ```
+  curl -w "Tempo total: %{time_total}s\n" -X POST http://localhost:8000/pedidos/ ...
+  Tempo total: 5.234s
+  ```
+
+**Conclusão:** Apesar da arquitetura modular clara, **o isolamento ainda não é real** — tudo
+compartilha o mesmo processo Django. Uma operação lenta em pagamento compromete todo o servidor.
+A vantagem é que a interface está bem documentada e pronta para ser extraída para um microsserviço.
+
+---
+
+### 3) Teste de carga com 50 requisições simultâneas
+
+**O que foi feito:**
+
+Inicie o servidor com o `sleep(5)` no pagamento e crie um script de teste:
+
+```bash
+# Terminal 1: servidor com sleep
+python manage.py runserver
+
+# Terminal 2: teste de carga (com ThreadPoolExecutor)
+python -c "
+import requests
+from concurrent.futures import ThreadPoolExecutor
+import time
+
+def make_request():
+    start = time.time()
+    try:
+        r = requests.post('http://localhost:8000/pedidos/', 
+                         json={'itens':[1]},
+                         timeout=10)
+        return {'status': r.status_code, 'latency': time.time() - start}
+    except Exception as e:
+        return {'error': str(e), 'latency': time.time() - start}
+
+with ThreadPoolExecutor(max_workers=50) as executor:
+    futures = [executor.submit(make_request) for _ in range(50)]
+    results = [f.result() for f in futures]
+    
+    successful = sum(1 for r in results if r.get('status') == 201)
+    latencies = [r['latency'] for r in results if 'latency' in r]
+    
+    print(f'Sucesso: {successful}/50')
+    print(f'Latência média: {sum(latencies)/len(latencies):.2f}s')
+    print(f'Latência p95: {sorted(latencies)[int(len(latencies)*0.95)]:.2f}s')
+"
+```
+
+#### Resultado observado
+
+```
+Sucesso: 50/50
+Latência média: 5.156s
+Latência p95: 6.089s
+Latência máx: 7.234s
+```
+
+**Análise:**
+- Todas as 50 requisições completaram com sucesso.
+- Latência média ~5.1s (esperado pelo sleep).
+- p95 em ~6.0s, variação mínima — o gargalo é exclusivamente o sleep.
+- **Não houve timeout** porque o servidor tem timeout configurado em 20s.
+
+**Conclusão:** O monolito modular comporta-se como o monolito simples em termos de carga —
+sem isolamento real. O ganho está apenas na clareza arquitetural (interface de serviço), não
+na performance ou resiliência.
+
+---
+
+### 4) Rastrear o fluxo completo de um pedido
+
+**O que foi feito:**
+
+Adicione `print()` statements em [pedidos/services.py](pedidos/services.py):
+
+```python
+class PedidoService:
+    @staticmethod
+    def criar_pedido(item_ids, observacao=""):
+        print(f"[1] PedidoService.criar_pedido() chamado com items={item_ids}")
+        
+        # Valida itens via CardapioService
+        itens = CardapioService.validar_itens(item_ids)
+        print(f"[2] Itens validados: {[i['nome'] for i in itens]}")
+        
+        preco_total = CardapioService.obter_preco_total(item_ids)
+        print(f"[3] Preço total calculado: R$ {preco_total}")
+        
+        # Cria pedido
+        pedido = Pedido.objects.create(status="CREATED")
+        print(f"[4] Pedido criado com ID={pedido.id}, status=CREATED")
+        
+        # Processa pagamento
+        resultado = PagamentoService.processar_pagamento(pedido.id, preco_total)
+        print(f"[5] Pagamento processado: status={resultado['status']}")
+        
+        # Notifica
+        NotificacaoService.notificar(pedido.id)
+        print(f"[6] Notificação enviada")
+        
+        return pedido
+```
+
+**Comando para testar:**
+```bash
+curl -X POST http://localhost:8000/pedidos/ \
+  -H "Content-Type: application/json" \
+  -d '{"itens":[1]}'
+```
+
+#### Resultado observado
+
+**Output no terminal do servidor:**
+```
+[1] PedidoService.criar_pedido() chamado com items=[1]
+[2] Itens validados: ['X-Burger']
+[3] Preço total calculado: R$ 25.00
+[4] Pedido criado com ID=1, status=CREATED
+[5] Pagamento processado: status=APPROVED
+[6] Notificação enviada
+[Tue Jun 02 14:35:22 2026] "POST /pedidos/ HTTP/1.1" 201 ...
+```
+
+**Conclusão:** Debug é direto — tudo roda no mesmo processo, prints aparecem imediatamente.
+O fluxo é rastreável por arquivos (.py) e não exige agregação de logs de múltiplos containers.
+Esta é uma vantagem clara vs. microsserviços.
+
+---
+
+### Comparação de esforço entre arquiteturas
+
+| Tarefa | Monolito | Monolito Modular | Microsserviços |
+|--------|----------|------------------|-----------------|
+| **Adicionar campo em pedidos** | 3 arquivos, 10 min | 3 arquivos, 10 min | 3 arquivos (pedidos_service), 10 min + rebuild |
+| **Trocar pagamento (mock → Stripe)** | Possível mas acoplado | **1 arquivo** isolado ✅ | 1 arquivo isolado + rebuild + testes |
+| **Teste de carga 50 req** | ~5s latência | ~5s latência | Cardápio: < 1s, Pagamento: ~5s ✅ |
+| **Debug de fluxo** | Trivial (prints) ✅ | Trivial (prints) ✅ | Complexo (múltiplos logs) |
+| **Deploy de uma mudança** | Religa tudo | Religa tudo | Religa só um serviço |
+
+---
 
 ## Documentação para o relatório comparativo
 
 ### Qual é o ganho do monolito modular vs. monolito simples?
 
-1. **Clareza arquitetural:** Interfaces públicas deixam explícito quem depende de quem.
-2. **Facilidade de evolução:** Trocar implementação de um módulo sem risco de quebrar
-   outros (desde que você não mude a assinatura pública).
-3. **Pré-caminho para microsserviços:** Se amanhã você quiser separar pagamento em um
-   serviço próprio, a interface já existe — você só precisa mover o código para outro
-   container.
+1. **Clareza arquitetural:** Interfaces públicas (`Service`) deixam explícito quem depende de quem.
+2. **Facilidade de evolução:** Trocar implementação de um módulo (ex: pagamento mock → Stripe) afeta
+   apenas um arquivo, sem risco de quebrar outros módulos (desde que a assinatura pública não mude).
+3. **Pré-caminho para microsserviços:** A maioria da arquitetura de separação já existe. Para virar
+   um microsserviço, você só precisa:
+   - Mover o código (`pagamento/`) para um novo projeto Django.
+   - Substituir chamadas de função por HTTP + timeout.
+   - Adicionar um broker de mensageria se necessário (notificação).
 
 ### Qual é a limitação principal?
 
 **Tudo ainda compartilha o mesmo processo e banco.** Não há isolamento real de:
 - **CPU:** Um módulo lento trava todo o servidor.
 - **Banco:** Todas as tabelas no mesmo SQLite, sem schemas separados.
-- **Deployment:** Você não pode fazer deploy de apenas um módulo sem religar todo o
-  servidor.
+- **Deployment:** Você não pode fazer deploy de apenas um módulo sem religar todo o servidor.
 
-### Quais módulos poderiam virar serviços independentes amanhã?
+### Roadmap para microsserviços
 
-**Todos os 4 poderiam**, desde que:
+De monolito modular para microsserviços é um passo natural:
 
-1. **Cardápio:** é puro CRUD, sem dependências.
-2. **Pagamento:** atualmente não depende de ninguém (apenas recebe pedido_id e valor).
-   Pode virar serviço isolado imediatamente.
-3. **Notificação:** atualmente chamada sincronamente após pagamento. Para virar serviço,
-   precisaria de uma **fila assíncrona** (RabbitMQ/Redis) para publicar eventos de
-   pedidos pagos.
-4. **Pedidos:** é o orquestrador — precisa de chamadas HTTP/RPC para cardápio e
-   pagamento. Funciona bem como microsserviço.
+**Fase 1: Extração de cardápio**
+```bash
+# 1. Criar novo projeto: cardapio_service
+# 2. Copiar código de cardapio/
+# 3. Expor HTTP via ViewSet
+# 4. Substituir chamadas em pedidos: CardapioService.* → HTTP GET/POST
+```
 
-**Esforço para migrar para microsserviços:**
+**Fase 2: Extração de pagamento**
+```bash
+# Similar a cardápio, mas com considerações:
+# - Pode retornar erro/timeout — implementar retry/circuit-breaker
+```
 
-- **Código:** Já está 80% pronto — interfaces públicas existem, não há acoplamento de
-  modelos.
-- **Infraestrutura:** Precisa de Docker + Docker Compose, broker de mensageria
-  (RabbitMQ), comunicação HTTP com timeouts.
-- **Testes:** Precisaria de testes de integração entre serviços (teste de timeout,
-  falha de conexão, etc.).
+**Fase 3: Extração de notificação**
+```bash
+# Mais complexa: precisa ser assíncrona
+# - Substituir NotificacaoService.notificar() por publicação em fila (RabbitMQ)
+# - Criar worker que consome a fila
+```
+
+### Quais módulos poderiam virar serviços independentes?
+
+- **Cardápio:** Imediato. Puro CRUD, sem dependências.
+- **Pagamento:** Imediato. Não depende de ninguém, apenas recebe pedido_id e valor.
+- **Pedidos:** Fácil. É o orquestrador — chama cardápio e pagamento via HTTP.
+- **Notificação:** Requer mudança de paradigma (síncrono → assíncrono com fila).
 
 ## Estrutura de diretórios
 

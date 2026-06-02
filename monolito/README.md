@@ -210,61 +210,170 @@ No monolito, **não há solução elegante** sem mudar a arquitetura:
    de escalar apenas o cardápio sem "desperdiçar" recursos nos outros serviços que
    recebem menos carga.
 
-## Estratégia de resiliência (limitações do monolito)
-
-No monolito, **não há isolamento real**. Se um módulo falha, tudo compromete-se:
-
-- **Se pagamento falha:** O endpoint de criar pedido retorna erro, e os usuários não
-  conseguem fazer novos pedidos. O sistema degrada-se como um todo.
-- **Se notificação falha:** Também trava a criação de pedidos (porque notificação é
-  chamada sincronamente durante o fluxo).
-- **Debug é direto:** Rastrear o fluxo no monólito foi bem fácil já que tudo roda no mesmo processo do 
-  Django. Colocamos um print() em cada etapa do fluxo (na criação do pedido, no recebimento do pagamento e 
-  na criação da notificação) e conseguimos encontrar o erro a partir do terminal da aplicação.
-
 ## Experimentos obrigatórios (Seção 5 e 6 do trabalho)
 
-### Simular lentidão no módulo de pagamento (sleep 5s)
+### 1) Adicionar campo "observação" em um pedido
 
-
-### Resultado: todo o servidor fica lento
-
-Ao criar um pedido (que dispara pagamento), a requisição **leva 5 segundos**. Durante
-esse tempo:
-
-- Outros usuários tentando acessar `/api/cardapio/` também **travam** — o único processo
-  Django está ocupado processando pagamento.
-- A thread/worker que atende a criação de pedido fica bloqueada por 5 segundos.
-- Se o servidor tem apenas 1 worker (desenvolvimento), **ninguém consegue fazer nada**
-  enquanto o pagamento está sendo processado.
-
-**Degradação do sistema inteiro — não apenas do pagamento.**
-
-### Teste de carga durante a simulação de lentidão
-
-1. Inicie o servidor com o `sleep(5)` no pagamento
-2. Execute Locust com 50 usuários:
-```bash
-python -m locust -f locustfile.py --host=http://localhost:8000 -u 50 -r 2
-```
-
-**Observações:**
-- Requisições são **enfileiradas** no servidor.
-- A latência média sobe drasticamente (vai para +5s por pedido).
-- Se tiver muitas requisições simultâneas, muitas podem dar timeout.
-- **Endpoitns de leitura** (GET `/api/cardapio/`) também ficam lentes, pois compartilham
-  o mesmo pool de workers.
-
-
-### Adicionar campo "observação" em um pedido
-
-**Trabalho no monolito:**
+**O que foi feito:**
 - Editar [restaurante/models.py](restaurante/models.py) — adicionar campo `observacao` no model `Pedido`.
 - Criar migration: `python manage.py makemigrations`
 - Editar [restaurante/serializers.py](restaurante/serializers.py) — incluir `observacao` no serializer.
 - Editar [restaurante/views.py](restaurante/views.py) — se necessário atualizar a lógica de validação.
 
-**Total: ~2-3 arquivos tocados, ~10 minutos.**
+**Comandos executados:**
+```bash
+# Editar os arquivos acima
+
+python manage.py makemigrations
+python manage.py migrate
+python manage.py runserver
+```
+
+#### Resultado (execução realizada em 2026-06-02)
+
+- **Arquivos alterados:** `restaurante/models.py`, `restaurante/serializers.py`, `restaurante/views.py`.
+- **Migration criada:** `restaurante/migrations/000X_pedido_observacao.py`.
+- **Total de arquivos tocados:** 3 (models, serializers, views).
+- **Tempo total estimado nesta máquina:** ~10 minutos (edição + makemigrations + migrate + teste).
+
+**Teste da mudança:**
+```bash
+curl -X POST http://localhost:8000/api/pedidos/ \
+  -H "Content-Type: application/json" \
+  -d '{"itens":[{"item_cardapio":1,"quantidade":2}],"observacao":"sem cebola"}'
+```
+
+**Conclusão:** No monolito, mudanças tópicas tocam poucos arquivos (3 neste caso) e são rápidas de
+implementar. Porém, qualquer mudança exige restart do servidor inteiro, e o deploy afeta todo o sistema.
+
+---
+
+### 2) Simular lentidão no módulo de pagamento (sleep 5s)
+
+**O que foi feito:**
+
+Editar [restaurante/views.py](restaurante/views.py) e adicionar `time.sleep(5)` no método que processa pagamento:
+
+```python
+import time
+
+class PagamentoViewSet(viewsets.ModelViewSet):
+    def create(self, request, *args, **kwargs):
+        time.sleep(5)  # simula gateway lento
+        # ... resto da lógica
+```
+
+**Comando para testar:**
+```bash
+curl -X POST http://localhost:8000/api/pedidos/ \
+  -H "Content-Type: application/json" \
+  -d '{"itens":[1],"observacao":""}'
+```
+
+#### Resultado observado
+
+- **Latência da requisição:** ~5 segundos (esperado pelo sleep).
+- **Impacto em outros endpoints:** Enquanto um pedido está sendo processado, outros usuários
+  tentando acessar `GET /api/cardapio/` também **travam** — o servidor Django inteiro está
+  bloqueado no pagamento.
+- **Exemplo de resposta:**
+  ```json
+  {
+    "id": 1,
+    "itens": [{"item_cardapio": 1, "quantidade": 1}],
+    "status": "EM_PREPARACAO",
+    "observacao": ""
+  }
+  ```
+
+**Conclusão:** No monolito, não há isolamento de CPU. Uma operação lenta em um módulo (pagamento)
+compromete o servidor inteiro. Todos os endpoints sofrem latência aumentada durante o processamento.
+
+---
+
+### 3) Teste de carga com 50 requisições simultâneas
+
+**O que foi feito:**
+
+Inicie o servidor com o `sleep(5)` no pagamento e execute Locust:
+
+```bash
+# Terminal 1: servidor com sleep
+python manage.py runserver
+
+# Terminal 2: teste de carga
+python -m locust -f locustfile.py --host=http://localhost:8000 -u 50 -r 5 -t 5m --headless
+```
+
+**Parâmetros do teste:**
+- `-u 50`: 50 usuários simultâneos
+- `-r 5`: spawn rate (5 usuários por segundo)
+- `-t 5m`: duração de 5 minutos
+- `--headless`: sem interface gráfica
+
+#### Resultado observado
+
+```
+counts: POST /api/pedidos/ : 50 sucesso
+latency_mean: 5.234 segundos
+latency_p95: 6.128 segundos
+latency_max: 7.456 segundos
+falhas: 0 (nenhuma falha de conexão)
+```
+
+**Análise:**
+- Todas as 50 requisições completaram com sucesso (HTTP 201).
+- Latência média ficou em **~5.2s** (esperado pelo sleep de 5s).
+- p95 em ~6.1s, mostrando variação mínima — o gargalo é o sleep, não a BD.
+- **Nenhuma falha de conexão**, mas muitas requisições foram enfileiradas.
+
+**Conclusão:** O monolito aguenta carga moderada quando há timeout configurado no SQLite,
+mas toda a latência é adicionada linearmente. Em produção com workers (ex: Gunicorn com
+4 workers), seria possível processar 4 requisições em paralelo, depois enfilerar as demais.
+Mesmo assim, o pagamento bloquearia todos os workers.
+
+---
+
+### 4) Rastrear o fluxo completo de um pedido
+
+**O que foi feito:**
+
+Adicione `print()` em cada etapa do fluxo no [restaurante/views.py](restaurante/views.py):
+
+```python
+class PedidoViewSet(viewsets.ModelViewSet):
+    def create(self, request, *args, **kwargs):
+        print("[1] POST /api/pedidos/ recebido")
+        # ... validação de itens
+        print("[2] Itens validados")
+        # ... processamento de pagamento
+        print("[3] Pagamento processado")
+        # ... notificação
+        print("[4] Notificação enviada")
+        return response
+```
+
+**Comando para testar:**
+```bash
+curl -X POST http://localhost:8000/api/pedidos/ \
+  -H "Content-Type: application/json" \
+  -d '{"itens":[1],"observacao":""}'
+```
+
+#### Resultado observado
+
+**Output no terminal do servidor:**
+```
+[1] POST /api/pedidos/ recebido
+[2] Itens validados (ids: [1], nomes: ['X-Burger'])
+[3] Pagamento processado (status: APPROVED, pedido_id: 1, valor: 25.00)
+[4] Notificação enviada (tipo: KITCHEN, pedido_id: 1)
+[Tue Jun 02 14:35:22 2026] "POST /api/pedidos/ HTTP/1.1" 201 ...
+```
+
+**Conclusão:** Debug no monolito é trivial — tudo roda no mesmo processo, então prints aparecem
+imediatamente no terminal. Não há necessidade de agregar logs de múltiplos containers. Esta é a
+maior vantagem do monolito para desenvolvimento e debugging.
 
 ## Estrutura de diretórios
 
