@@ -5,7 +5,6 @@ from .serializers import CriarPedidoSerializer
 from .models import Pedido, PedidoItem
 from .services import PedidoService
 
-# Importação da interface do OUTRO módulo (Padrão Modular)
 from cardapio.services import CardapioService
 
 

@@ -8,5 +8,5 @@ class ItemCardapio(models.Model):
     disponivel = models.BooleanField(default=True)
 
     class Meta:
-        db_table = 'cardapio_item' #Simula o Schema 'cardapio'
+        db_table = 'cardapio_item' 
     

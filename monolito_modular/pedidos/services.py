@@ -1,5 +1,4 @@
 from .models import Pedido
-# Importamos APENAS da interface do módulo de pagamento (Padrão Modular)
 from pagamento.services import PagamentoService
 from notificacao.services import NotificacaoService
 

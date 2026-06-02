@@ -35,7 +35,6 @@ O objetivo desta versão é manter uma única aplicação e banco de dados, mas 
 - [x] Simulação de lentidão no pagamento (`sleep 5s` em `PagamentoService`)
 - [x] Módulos com interfaces públicas separadas
 - [x] Nenhum módulo acessa diretamente entidades de outro módulo
-- [x] `notificacao` agora está implementado como app Django completo
 - [x] Endpoint de listagem de pedidos
 - [x] Endpoint de cancelamento de pedido
 
