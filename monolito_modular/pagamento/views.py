@@ -2,7 +2,7 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 
-from .services import PagamentoService
+from .models import Transacao
 
 
 class PagamentoHealthView(APIView):
@@ -15,14 +15,19 @@ class PagamentoHealthView(APIView):
 
 class PagamentoStatusView(APIView):
     def get(self, request, pedido_id: int):
-        status_pagamento = PagamentoService.consultar_status(pedido_id)
-        if status_pagamento is None:
+        transacao = Transacao.objects.filter(pedido_id=pedido_id).first()
+        if transacao is None:
             return Response(
-                {"erro": "Pagamento não encontrado."},
+                {"erro": "Pagamento não encontrado para este pedido."},
                 status=status.HTTP_404_NOT_FOUND,
             )
 
         return Response(
-            {"pedido_id": pedido_id, "status": status_pagamento},
+            {
+                "pedido_id": transacao.pedido_id,
+                "status": transacao.status,
+                "status_pagamento": transacao.status,
+                "valor": transacao.valor,
+            },
             status=status.HTTP_200_OK,
         )

@@ -97,3 +97,7 @@ class PedidoDetailAPIView(APIView):
             },
             status=status.HTTP_200_OK,
         )
+
+
+class CancelarPedidoAPIView(PedidoDetailAPIView):
+    pass

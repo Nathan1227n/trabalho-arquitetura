@@ -1,24 +1,39 @@
 import time
+from .models import Transacao
 
 
 class PagamentoService:
-    _status = {}
-
     @staticmethod
-    def processar_pagamento_mock(pedido_id: int, valor_total: float) -> bool:
+    def processar_pagamento_mock(pedido_id: int, valor_total: float) -> str:
         """
-        Interface pública do pagamento.
-        Cumpre o Experimento Obrigatório (sleep 5s).
+        Salva a transação, simula lentidão e aprova.
         """
-        print(f"💸 Iniciando pagamento do pedido {pedido_id}...")
+        print(f"�� Iniciando pagamento do pedido {pedido_id}...")
 
-        # Simula a lentidão
+        transacao, created = Transacao.objects.get_or_create(
+            pedido_id=pedido_id,
+            defaults={
+                'valor': valor_total,
+                'status': 'PROCESSANDO',
+            },
+        )
+        if not created:
+            transacao.valor = valor_total
+            transacao.status = 'PROCESSANDO'
+            transacao.save(update_fields=['valor', 'status'])
+
+        # Simula a lentidão (Experimento Obrigatório)
         time.sleep(5)
 
-        PagamentoService._status[pedido_id] = 'PAGO'
+        transacao.status = 'APROVADO'
+        transacao.save(update_fields=['status'])
         print("✅ Pagamento aprovado!")
-        return True
+
+        return transacao.status
 
     @staticmethod
     def consultar_status(pedido_id: int):
-        return PagamentoService._status.get(pedido_id)
+        transacao = Transacao.objects.filter(pedido_id=pedido_id).first()
+        if transacao is None:
+            return None
+        return transacao.status

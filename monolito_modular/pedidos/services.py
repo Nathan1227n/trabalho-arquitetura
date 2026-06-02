@@ -1,5 +1,5 @@
 from .models import Pedido
-# Importamos APENAS das interfaces dos outros módulos!
+# Importamos APENAS da interface do módulo de pagamento (Padrão Modular)
 from pagamento.services import PagamentoService
 from notificacao.services import NotificacaoService
 
@@ -10,9 +10,9 @@ class PedidoService:
         pedido = Pedido.objects.get(id=pedido_id)
 
         # 1. Chama o módulo de pagamento via interface
-        sucesso = PagamentoService.processar_pagamento_mock(pedido_id, valor_total)
+        status_pagamento = PagamentoService.processar_pagamento_mock(pedido_id, valor_total)
 
-        if sucesso:
+        if status_pagamento == 'APROVADO':
             pedido.status = 'PAGO'
             pedido.save()
 
@@ -30,8 +30,8 @@ class PedidoService:
     @staticmethod
     def cancelar_pedido(pedido_id: int):
         pedido = Pedido.objects.get(id=pedido_id)
-        if pedido.status == 'COZINHA':
-            raise ValueError('Pedido já foi para cozinha e não pode ser cancelado.')
+        if pedido.status in ('PAGO', 'COZINHA'):
+            raise ValueError('Pedido já foi pago ou enviado para cozinha e não pode ser cancelado.')
 
         pedido.status = 'CANCELADO'
         pedido.save()
